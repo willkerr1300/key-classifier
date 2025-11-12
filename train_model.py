@@ -13,7 +13,7 @@ import tensorflow as tf
 # -----------------------------
 # Parameters
 # -----------------------------
-DATA_DIR = "audio_dataset"     # audio_dataset/genre_name/*.wav
+DATA_DIR = "genres_original"     # audio_dataset/genre_name/*.wav
 SR = 22050                     # sample rate
 DURATION = 30                  # seconds — if shorter, padded
 N_MELS = 128                   # mel bands
@@ -36,23 +36,26 @@ for genre in GENRES:
             if file.lower().endswith(('.mp3', '.wav', '.ogg')):
                 file_paths.append(os.path.join(genre_path, file))
                 labels.append(genre)
-
 print(f"Found {len(file_paths)} audio files.")
 
 # -----------------------------
 # Convert audio → mel spectrogram image
 # -----------------------------
 def audio_to_melspectrogram(file_path):
-    y, sr = librosa.load(file_path, sr=SR)
-    
-    # Ensure fixed duration
+    try:
+        y, sr = librosa.load(file_path, sr=SR, mono=True)
+    except Exception as e:
+        print(f"Skipping {file_path}: {e}")
+        return None
+
+    # Pad or truncate to fixed duration
     desired_length = SR * DURATION
     if len(y) < desired_length:
         y = np.pad(y, (0, desired_length - len(y)))
     else:
         y = y[:desired_length]
 
-    # Mel spectrogram
+    # Compute mel spectrogram
     S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=N_MELS)
     S_dB = librosa.power_to_db(S, ref=np.max)
 
@@ -60,16 +63,41 @@ def audio_to_melspectrogram(file_path):
     S_norm = (S_dB - S_dB.min()) / (S_dB.max() - S_dB.min())
 
     # Resize to fixed shape
-    S_resized = resize(S_norm[..., np.newaxis], [IMG_HEIGHT, IMG_WIDTH])
-    
+    S_resized = resize(S_norm[..., np.newaxis], [IMG_HEIGHT, IMG_WIDTH]).numpy()
+
     # Convert to 3-channel image
     S_img = np.repeat(S_resized, 3, axis=-1)
 
-    return S_img.numpy()
+    return S_img.astype(np.float32)
 
-print("Processing audio to spectrograms...")
-X = np.array([audio_to_melspectrogram(f) for f in file_paths])
+file_paths = []
+labels = []
+
+for genre in GENRES:
+    genre_path = os.path.join(DATA_DIR, genre)
+    if os.path.isdir(genre_path):
+        for file in os.listdir(genre_path):
+            if file.lower().endswith(".wav"):
+                file_paths.append(os.path.join(genre_path, file))
+                labels.append(genre)
+
+X_list = []
+labels_clean = []
+
+for f, label in zip(file_paths, labels):
+    S = audio_to_melspectrogram(f)
+    if S is not None:
+        if S.shape == (IMG_HEIGHT, IMG_WIDTH, 3):
+            X_list.append(S)
+            labels_clean.append(label)
+        else:
+            print(f"Skipping {f}: unexpected shape {S.shape}")
+
+X = np.stack(X_list)  # creates proper 4D array for CNN
+labels = labels_clean
+
 print("Spectrograms ready:", X.shape)
+print("Labels count:", len(labels))
 
 # -----------------------------
 # Encode labels
@@ -90,7 +118,7 @@ X_val, X_test, y_val, y_test = train_test_split(
     X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
 )
 
-print(f"📊 Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+print(f"Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
 
 # -----------------------------
 # CNN Model
@@ -126,8 +154,8 @@ history = model.fit(
     X_train, y_train,
     validation_data=(X_val, y_val),
     batch_size=32,
-    epochs=50,
-    callbacks=[early_stop]
+    epochs=80#,
+    #callbacks=[early_stop]
 )
 
 # -----------------------------
@@ -136,5 +164,5 @@ history = model.fit(
 test_loss, test_acc = model.evaluate(X_test, y_test)
 print(f"Test accuracy: {test_acc:.3f}")
 
-model.save("music_genre_classifier.h5")
-print("Model saved: music_genre_classifier.h5")
+model.save("music_genre_classifier.keras")
+print("Model saved: music_genre_classifier.keras")
