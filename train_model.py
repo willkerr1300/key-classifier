@@ -24,7 +24,7 @@ IMG_HEIGHT = N_MELS
 GENRES = ['blues', 'classical', 'hiphop', 'disco', 'country', 'jazz', 'metal', 'pop', 'reggae', 'rock']
 
 # -----------------------------
-# Audio → Mel Spectrogram
+# Audio to Mel Spectrogram
 # -----------------------------
 def audio_to_melspectrogram(file_path, augment=False):
     try:
